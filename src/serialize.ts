@@ -24,6 +24,7 @@ const Serializer = /*@__PURE__*/ (function () {
     serialized = "";
 
     #context = new Map();
+    #contents = new WeakMap();
 
     write(str: string) {
       this.serialized += str;
@@ -71,7 +72,7 @@ const Serializer = /*@__PURE__*/ (function () {
       this.write(`${bigint}n`);
     }
 
-    $object(object: any): string | void {
+    $object(object: any): void {
       const objString = Object.prototype.toString.call(object);
 
       let objType = "";
@@ -90,8 +91,16 @@ const Serializer = /*@__PURE__*/ (function () {
       if ((objectNumber = this.#context.get(object)) === undefined) {
         this.#context.set(object, this.#context.size);
       } else {
+        const content = this.#contents.get(object);
+
+        if (content) {
+          return this.write(content);
+        }
+
         return this.write(`#${objectNumber}`);
       }
+
+      const currentLength = this.serialized.length;
 
       if (
         objType !== "Object" &&
@@ -104,9 +113,10 @@ const Serializer = /*@__PURE__*/ (function () {
           handler.call(this, object);
         } else {
           if (typeof object?.entries === "function") {
-            return this.objectEntries(objType, object.entries());
+            this.objectEntries(objType, object.entries());
+          } else {
+            throw new TypeError(`Cannot serialize ${objType}`);
           }
-          throw new Error(`Cannot serialize ${objType}`);
         }
       } else {
         const constructor = object.constructor.name;
@@ -115,10 +125,13 @@ const Serializer = /*@__PURE__*/ (function () {
           if (objectName) {
             this.write(objectName);
           }
-          return this.$object(object.toJSON());
+          this.$object(object.toJSON());
+        } else {
+          this.objectEntries(objectName, Object.entries(object));
         }
-        return this.objectEntries(objectName, Object.entries(object));
       }
+
+      this.#contents.set(object, this.serialized.slice(currentLength));
     }
 
     $function(fn: any) {
