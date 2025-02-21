@@ -16,17 +16,28 @@ export function serialize(input: any): string {
   }
   const serializer = new Serializer();
   serializer.dispatch(input);
-  return serializer.serialized;
+  return serializer.getSerialized();
 }
 
 const Serializer = /*@__PURE__*/ (function () {
   class Serializer {
-    serialized = "";
+    #buffer = "";
+    #serialized = "";
+    #contents = new Map();
 
-    #context = new Map();
+    getSerialized() {
+      this.commit();
+
+      return this.#serialized;
+    }
 
     write(str: string) {
-      this.serialized += str;
+      this.#buffer += str;
+    }
+
+    commit() {
+      this.#serialized += this.#buffer;
+      this.#buffer = "";
     }
 
     dispatch(value: any): string | void {
@@ -43,7 +54,51 @@ const Serializer = /*@__PURE__*/ (function () {
       return serialize(a).localeCompare(serialize(b));
     }
 
-    objectEntries(type: string, entries: Iterable<[string, any]>) {
+    writeObject(object: any): void {
+      const objString = Object.prototype.toString.call(object);
+
+      let objType: string;
+
+      // '[object a]'.length === 10, the minimum
+      if (objString.length < 10) {
+        objType = `unknown:[${objString}]`;
+      } else {
+        // '[object '.length === 8
+        objType = objString.slice(8, -1);
+      }
+
+      if (
+        objType !== "Object" &&
+        objType !== "Function" &&
+        objType !== "AsyncFunction"
+      ) {
+        // @ts-expect-error
+        const handler = this["$" + objType];
+        if (handler) {
+          return handler.call(this, object);
+        }
+
+        if (typeof object?.entries === "function") {
+          return this.writeObjectEntries(objType, object.entries());
+        }
+
+        throw new TypeError(`Cannot serialize ${objType}`);
+      }
+
+      const constructor = object.constructor.name;
+
+      objType = constructor === "Object" ? "" : constructor;
+
+      if (typeof object.toJSON === "function") {
+        this.write(objType);
+
+        return this.$object(object.toJSON());
+      }
+
+      this.writeObjectEntries(objType, Object.entries(object));
+    }
+
+    writeObjectEntries(type: string, entries: Iterable<[string, any]>): void {
       const sortedEntries = Array.from(entries).sort((a, b) =>
         this.compare(a[0], b[0]),
       );
@@ -60,7 +115,7 @@ const Serializer = /*@__PURE__*/ (function () {
     }
 
     $string(string: any) {
-      this.write("'" + string + "'");
+      this.write(`'${string}'`);
     }
 
     $symbol(symbol: symbol) {
@@ -71,54 +126,15 @@ const Serializer = /*@__PURE__*/ (function () {
       this.write(`${bigint}n`);
     }
 
-    $object(object: any): string | void {
-      const objString = Object.prototype.toString.call(object);
-
-      let objType = "";
-      const objectLength = objString.length;
-
-      // '[object a]'.length === 10, the minimum
-      if (objectLength < 10) {
-        objType = "unknown:[" + objString + "]";
-      } else {
-        // '[object '.length === 8
-        objType = objString.slice(8, objectLength - 1);
+    $object(object: any): void {
+      if (this.#contents.has(object)) {
+        return this.write(this.#contents.get(object));
       }
 
-      let objectNumber = null;
-
-      if ((objectNumber = this.#context.get(object)) === undefined) {
-        this.#context.set(object, this.#context.size);
-      } else {
-        return this.write(`#${objectNumber}`);
-      }
-
-      if (
-        objType !== "Object" &&
-        objType !== "Function" &&
-        objType !== "AsyncFunction"
-      ) {
-        // @ts-expect-error
-        const handler = this["$" + objType];
-        if (handler) {
-          handler.call(this, object);
-        } else {
-          if (typeof object?.entries === "function") {
-            return this.objectEntries(objType, object.entries());
-          }
-          throw new Error(`Cannot serialize ${objType}`);
-        }
-      } else {
-        const constructor = object.constructor.name;
-        const objectName = constructor === "Object" ? "" : constructor;
-        if (typeof object.toJSON === "function") {
-          if (objectName) {
-            this.write(objectName);
-          }
-          return this.$object(object.toJSON());
-        }
-        return this.objectEntries(objectName, Object.entries(object));
-      }
+      this.#contents.set(object, `#${this.#contents.size}`);
+      this.commit();
+      this.writeObject(object);
+      this.#contents.set(object, this.#buffer);
     }
 
     $function(fn: any) {
@@ -158,7 +174,7 @@ const Serializer = /*@__PURE__*/ (function () {
     }
 
     $Map(map: Map<any, any>) {
-      return this.objectEntries("Map", map.entries());
+      return this.writeObjectEntries("Map", map.entries());
     }
   }
 

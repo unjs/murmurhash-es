@@ -122,12 +122,6 @@ describe("serialize", () => {
       expect(serialize({ b: 2, a: 1 })).toMatchInlineSnapshot(`"{a:1,b:2}"`);
     });
 
-    it("circular", () => {
-      const obj: any = {};
-      obj.foo = obj;
-      expect(serialize(obj)).toMatchInlineSnapshot(`"{foo:#0}"`);
-    });
-
     it("symbol key", () => {
       expect(serialize({ [Symbol("s")]: 123 })).toMatchInlineSnapshot(`"{}"`);
     });
@@ -185,7 +179,135 @@ describe("serialize", () => {
     it("blob", () => {
       expect(() =>
         serialize(new Blob(["x"])),
-      ).toThrowErrorMatchingInlineSnapshot(`[Error: Cannot serialize Blob]`);
+      ).toThrowErrorMatchingInlineSnapshot(
+        `[TypeError: Cannot serialize Blob]`,
+      );
     });
+  });
+
+  describe("circular references", () => {
+    it("handles simple circular reference", () => {
+      const obj: any = {};
+      obj.foo = obj;
+      expect(serialize(obj)).toMatchInlineSnapshot(`"{foo:#0}"`);
+    });
+
+    it("handles circular references in nested objects", () => {
+      const obj: any = { a: { b: {} } };
+      obj.a.b = obj;
+      expect(serialize(obj)).toMatchInlineSnapshot(`"{a:{b:#0}}"`);
+    });
+
+    it("handles circular references in arrays", () => {
+      const arr: any[] = [];
+      arr.push(arr);
+      expect(serialize(arr)).toMatchInlineSnapshot(`"[#0]"`);
+    });
+
+    it("handles deep circular references", () => {
+      const obj: any = { a: { b: { c: {} } } };
+      obj.a.b.c = obj.a;
+      expect(serialize(obj)).toMatchInlineSnapshot(`"{a:{b:{c:#1}}}"`);
+    });
+
+    it("handles mixed object and array references", () => {
+      const obj: any = { a: [] };
+      obj.a.push(obj);
+      expect(serialize(obj)).toMatchInlineSnapshot(`"{a:[#0]}"`);
+    });
+
+    it("handles self-referencing objects with multiple keys", () => {
+      const obj: any = { a: {}, b: {} };
+      obj.a.ref = obj;
+      obj.b.ref = obj;
+      expect(serialize(obj)).toMatchInlineSnapshot(`"{a:{ref:#0},b:{ref:#0}}"`);
+    });
+
+    it("handles circular references with symbols as keys", () => {
+      const sym = Symbol("key");
+      const obj: any = {};
+      obj[sym] = obj;
+      expect(serialize(obj)).toMatchInlineSnapshot(`"{}"`);
+    });
+
+    it("handles circular references within Map objects", () => {
+      const map = new Map();
+      map.set("key", map);
+      expect(serialize(map)).toMatchInlineSnapshot(`"Map{key:#0}"`);
+    });
+
+    it("handles circular references within Set objects", () => {
+      const set = new Set();
+      set.add(set);
+      expect(serialize(set)).toMatchInlineSnapshot(`"Set[#0]"`);
+    });
+
+    it("handles multiple circular references within the same object", () => {
+      const obj: any = { a: { name: "A" }, b: { name: "B" } };
+      obj.a.ref = obj.b;
+      obj.b.ref = obj.a;
+      expect(serialize(obj)).toMatchInlineSnapshot(
+        `"{a:{name:'A',ref:{name:'B',ref:#1}},b:{name:'B',ref:#1}}"`,
+      );
+    });
+
+    it("handles deep recursion with multiple levels of references", () => {
+      const obj: any = { x: { y: { z: {} } } };
+      obj.x.y.z.ref1 = obj.x;
+      obj.x.y.z.ref2 = obj;
+      expect(serialize(obj)).toMatchInlineSnapshot(
+        `"{x:{y:{z:{ref1:#1,ref2:#0}}}}"`,
+      );
+    });
+  });
+
+  describe("consistency", () => {
+    const v = {
+      a: { value: 1 },
+      b: { value: 1 },
+      c: { value: 1 },
+    };
+
+    const o: Record<string, unknown> = {
+      vvv: {
+        value: { value: 1 },
+        values: [{ value: 1 }, { value: 1 }],
+      },
+      aaa: {
+        value: v.a,
+        values: [v.a, v.a],
+      },
+      aab: {
+        value: v.a,
+        values: [v.a, v.b],
+      },
+      aac: {
+        value: v.a,
+        values: [v.a, v.c],
+      },
+      aca: {
+        value: v.a,
+        values: [v.c, v.a],
+      },
+      bbb: {
+        value: v.b,
+        values: [v.b, v.b],
+      },
+      bbc: {
+        value: v.b,
+        values: [v.b, v.c],
+      },
+      cca: {
+        value: v.c,
+        values: [v.c, v.a],
+      },
+    };
+
+    Object.keys(o).flatMap((keyA) =>
+      Object.keys(o).map((keyB) =>
+        it(`Expected: "${keyA}" equals Received: "${keyB}"`, () =>
+          expect(serialize(o[keyB])).toBe(serialize(o[keyA]))),
+      ),
+    );
   });
 });

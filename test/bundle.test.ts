@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 import zlib from "node:zlib";
-import { build } from "esbuild";
+import { describe, expect, it } from "vitest";
 
 describe("bundle size", () => {
   it("digest (js)", async () => {
@@ -22,8 +22,8 @@ describe("bundle size", () => {
     `;
     const { bytes, gzipSize } = await getBundleSize(code);
     // console.log({ bytes, gzipSize });
-    expect(bytes).toBeLessThanOrEqual(2400); // <2.4kb
-    expect(gzipSize).toBeLessThanOrEqual(1000); // <1kb
+    expect(bytes).toBeLessThanOrEqual(2600); // <2.6kb
+    expect(gzipSize).toBeLessThanOrEqual(1100); // <1.1kb
   });
 
   it("hash", async () => {
@@ -33,7 +33,7 @@ describe("bundle size", () => {
     `;
     const { bytes, gzipSize } = await getBundleSize(code);
     // console.log({ bytes, gzipSize });
-    expect(bytes).toBeLessThanOrEqual(2700); // <2.7kb
+    expect(bytes).toBeLessThanOrEqual(2800); // <2.8kb
     expect(gzipSize).toBeLessThanOrEqual(1200); // <1.2kb
   });
 });
